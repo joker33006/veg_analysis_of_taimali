@@ -1,0 +1,320 @@
+---
+title: "Vegetation analysis for Taimali"
+output: html_notebook
+---
+# 概述
+本分析為太麻里永久樣區的植群分析。該資料為兩次永久樣區複查資料，分別於2009年與2014年進行調查。資料僅有胸徑超過1 cm 的上木資料。
+分析主要分成以下幾項部分
+1. 永久樣區的植群空間異質性
+將永久樣區以10X10為單位，做植群分群圖，檢視兩期調查中，各區域是否有主要組成物種改變的情況發生。
+2. 永久樣區的耐陰性空間異質性
+利用郭耀綸等人(2021)的木本植物耐陰性等級，以社會權重指數的方式，計算各小區中的物種耐陰性等級。
+3. 空間分布
+以空間分布探究大徑木與小徑木的關係
+
+# 0. package
+```{r}
+library(data.table)
+library(readxl)
+library(tidyverse)
+library(vegan)
+require(factoextra) ## for fviz_nbclust
+library(colorspace)
+library(sf)### Moran’s I 
+library(sp)### Moran’s I 
+library(spdep)### Moran’s I 
+library(writexl)
+library(patchwork)
+path <- "G:/我的雲端硬碟/協助分析/元偉學長/"
+```
+# 1. 資料梳理
+
+## 1.1 總植群資料分群
+```{r}
+dt <- fread(paste0(path,"/rawdata/rawdata.csv"))
+dt[dom_2004>0,c_2004:=1][dom_2019>0,c_2019:=1]
+ivi_2004 <- dt[dom_2004>0,.(dom=sum(dom_2004),den=sum(c_2004,na.rm = T),frq=1),by=.(Quadrat1,Csp_new,Name_id)]
+ivi_2019 <- dt[dom_2019>0,.(dom=sum(dom_2019),den=sum(c_2019,na.rm = T),frq=1),by=.(Quadrat1,Csp_new,Name_id)]
+ivi_2004[,ivi:=(dom/sum(dom)+den/sum(den)+frq/sum(frq))*100]
+ivi_2019[,ivi:=(dom/sum(dom)+den/sum(den)+frq/sum(frq))*100]
+ivi_2004[,Q_id:=paste0("2004_",Quadrat1)]
+ivi_2019[,Q_id:=paste0("2019_",Quadrat1)]
+ivi_t <- rbind(ivi_2004,ivi_2019)
+ivi_m<- dcast(ivi_t,Q_id~Name_id,value.var = "ivi",fun.aggregate = sum,fill=0)
+t_dis <- vegdist(ivi_m[,2:ncol(ivi_m)], method="cao") 
+t_clu <- hclust(t_dis,method="ward.D2")  
+plot(t_clu)
+t_KM <- cascadeKM(t_dis, 1, 10, iter = 1000)
+t_KM$results %>% 
+        as.data.frame() %>%
+        rownames_to_column("metric") %>%
+          pivot_longer(names_to = "groups", 
+                       values_to = "value", 
+                       - metric) %>%
+        mutate(groups = str_extract(groups, "\\d+"), 
+               groups = as.numeric(groups)) %>%
+  filter(metric != "SSE") %>%
+  ggplot(aes(x=groups, y = value)) + theme_bw(16) +
+  geom_line(lwd=1.5, col="blue") +
+  geom_point(pch=21, col="lightgrey", 
+             bg="blue", stroke = 1.5, size=5) +
+  scale_x_continuous(breaks = c(2:10), labels = c(2:10)) +
+  theme(panel.grid.minor.x = element_blank()) 
+fviz_nbclust(ivi_m[,2:ncol(ivi_m)], 
+             FUNcluster = kmeans,   # K-Means
+             method = "silhouette", # Avg. Silhouette
+             k.max = 12             # max number of clusters
+             ) +
+    labs(title="Avg.Silhouette Method for K-Means")
+rm(ivi_2004,ivi_2019)
+```
+## 1.2 植群型分布變化
+```{r}
+t_cls <- data.table(Q_id=ivi_m$Q_id,class=cutree(t_clu,k=3))
+plot(t_clu)
+t_cls[,c("year","loc"):= tstrsplit(Q_id, "_", fixed=TRUE)]
+t_cls[,c("x","y"):=tstrsplit(loc,",",fixed=TRUE)]
+t_cls[,x_loc:=as.numeric(x)+0.5][
+  ,y_loc:=as.numeric(y)+0.5][
+    ,group:=as.factor(class)]
+ggplot(data=t_cls,aes(x_loc,y_loc,fill=group))+
+  geom_tile(colour = "grey70",alpha=0.7,linewidth=0.6)+
+  theme_bw()+
+  scale_x_continuous(breaks=-1:10)+
+  scale_y_continuous(breaks=0:10)+
+  labs(x="x-axis",y="y-axis")+
+  facet_grid(~year)+
+  scale_fill_discrete_sequential(palette = "Green-Yellow",
+                                 nmax=4, order = 4:2)
+ggsave(paste0(path,"result/cluster_com.jpeg"),height=6,width=12,dpi=300)
+veg_cls<- data.table(ivi_m,group=t_cls$group) %>% 
+  melt(.,id.vars = c("Q_id","group"),
+      variable.name = "species",value.name = "ivi")
+veg_cls[,c("year","loc"):= tstrsplit(Q_id, "_", fixed=TRUE)]
+t_cla_spe <- veg_cls[ivi>0,.(ivi=sum(ivi)/.N),by=.(year,species,group)] %>%
+  dcast(.,year+species~group,value.var = "ivi")
+write.csv(t_cla_spe,paste0(path,"/result/vegetation_class_result.csv"))
+```
+
+# 2 耐陰物種傾向分析
+```{r}
+rm(ivi_2004,ivi_2019,t_clu,t_KM,veg_cls,cla_2019_spe)
+sh_tel <- fread(paste0(path,"/rawdata/耐陰等級.csv"),encoding = "UTF-8")
+colnames(ivi_t)
+sh_dt <- ivi_t[sh_tel,on=.(Name_id)]
+class(sh_dt$Sh_resistance)
+sh_ind <- sh_dt[,.(sh_ind=sum(dom*Sh_resistance)/sum(dom)),by=.(Q_id)]
+sh_dt[,sh_ind:=dom*Sh_resistance/sum(dom),by=.(Q_id)]
+sh_dt[,c("year","loc"):= tstrsplit(Q_id, "_", fixed=TRUE)]
+sh_dt_t <- dcast(sh_dt,loc+Csp_new+Name_id+Sh_resistance~year,
+                 value.var = c("dom","sh_ind"),fill = 0)
+sh_dt_t[,sh_diff:=sh_ind_2019-sh_ind_2004]
+write_xlsx(sh_dt_t,paste0(path,"result/shade_ind_detail.xlsx"))
+sh_ind[,c("year","loc"):= tstrsplit(Q_id, "_", fixed=TRUE)]
+sh_ind_t <- dcast(sh_ind,loc~year,value.var = "sh_ind")
+sh_ind_t[,diff:=`2019`-`2004`]
+sh_ind <- melt(sh_ind_t,id.vars = "loc",value.name = "SRI",
+               variable.name = "Year")
+sh_ind[,c("x","y"):=tstrsplit(loc,",",fixed=TRUE)]
+sh_ind[,x_loc:=as.numeric(x)+0.5][
+  ,y_loc:=as.numeric(y)+0.5]
+ggplot(data=sh_ind[Year!="diff"],aes(x_loc,y_loc,fill=SRI))+
+  geom_tile(colour = "grey90",alpha=0.8,linewidth=1)+
+  theme_bw()+
+  scale_x_continuous(breaks=-1:10)+
+  scale_y_continuous(breaks=0:10)+
+  labs(x="x-axis",y="y-axis")+
+  facet_grid(~Year)+
+  scale_fill_gradient(
+  low = "#56B1F7",
+  high = "#132B43")
+
+ggsave(paste0(path,"result/shade_resistance.jpeg"),height=6,width=12,dpi=300)
+sh_ind[,sri_sy:=ifelse(SRI>=0,"+","-")]
+sh_ind[SRI==0,sri_sy==0]
+ggplot(data=sh_ind[Year=="diff"],aes(x_loc,y_loc,fill=SRI))+
+  geom_tile(colour = "grey70",alpha=0.8,linewidth=1)+
+  theme_bw()+
+  scale_x_continuous(breaks=-1:10)+
+  scale_y_continuous(breaks=0:10)+
+  geom_text(aes(label=sri_sy),size=6,color="gray20")+
+  labs(x="x-axis",y="y-axis",fill="difference of SRI")+
+  scale_fill_gradient2(
+  low = "#C23F2B",
+  mid = "gray90",
+  high ="#2128A6",
+  midpoint = 0)
+
+ggsave(paste0(path,"result/shade_resistance_diff.jpeg"),height=6,width=8,dpi=300)
+
+
+```
+# 3. 空間分析
+## 3.1 大徑木分析
+```{r}
+## 回推胸徑
+dt[,dbh_2019:=2*(dom_2019/pi)^(1/2)][,dbh_2004:=2*(dom_2004/pi)^(1/2)]
+t_loc <- read_xlsx(paste0(path,"rawdata/牛樟永久樣區地圖分布_fixed20240313.xlsx"))%>%
+  as.data.table()
+## 座標建立
+dt_loc <- dt[t_loc,on=.(Tag2019,Quadrat1,Quadrat2)]
+dt_loc[,X:=as.numeric(X)][,Y:=as.numeric(Y)]
+dt_loc <- dt_loc[!is.na(X)]
+dt_loc[,c("x_1","y_1"):=tstrsplit(Quadrat1,",",fixed=TRUE)]
+dt_loc[,c("x_1","y_1"):=.(as.numeric(x_1),as.numeric(y_1))]
+## 推算座標位置
+dt_loc[,c("x_2","y_2"):=.(x_1*10,y_1*10)]
+dt_loc[,c("x3","y3"):=.(x_2+X,y_2+Y)]
+dt_loc[Quadrat2==2,x3:=x3+5][
+  Quadrat2==3,c("x3","y3"):=.(x3+5,y3=y3+5)][
+    Quadrat2==4,y3:=y3+5]
+dt_loc[y3>100]
+sp_stat <- dt_loc[dbh_2004>40,.(dom_04=sum(dom_2004),N_04=.N),by=.(Csp_new,Name_id)]
+
+sp_stat_all <- sp_stat[dt_loc[dbh_2019>40,
+                                .(dom_19=sum(dom_2019),N_19=.N)
+                                ,by=.(Csp_new,Name_id)],on=.(Csp_new,Name_id)]
+sp_stat_all <- sp_stat_all[order(dom_04,N_04,decreasing = T),ord_04:=1:nrow(sp_stat_all)]
+write.csv(sp_stat_all,paste0(path,"result/dbh_40_stat.csv"))
+dt_40 <- dt_loc[(dbh_2004>=40|dbh_2019>=40)]
+
+dt_40[,Csp_new:=factor(Csp_new,levels=sp_stat_all[order(ord_04),Csp_new])]
+dt_40[,Name_id:=factor(Name_id,levels=sp_stat_all[order(ord_04),Name_id])]
+fs_name <- sp_stat_all[ord_04 %in% 1:5,Name_id]
+dt_40[Name_id %in% fs_name,Name_id_2:=Name_id][is.na(Name_id_2),Name_id_2:="others"]
+p1 <- ggplot(dt_40[dbh_2004>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2004))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  scale_size(limits=c(40,110),range =c(1,6))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
+
+p2 <- ggplot(dt_40[dbh_2019>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2019))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  scale_size(limits=c(40,110),range =c(1,6))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
+p1+p2+ plot_layout(guides = "collect")
+ggsave(paste0(path,"result/plot/sp_dis_40.jpeg"),height = 5,width=13)
+dt_40[dbh_2019==0,class:="Disappeared"][dbh_2019>0,class:="Subsisting"]
+dt_40[dbh_2019>=40&dbh_2004<40,class:="Ingrowth"]
+dt_40[,display_2019:=dbh_2019][dbh_2019==0,display_2019:=dbh_2004]
+ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  scale_size(limits=c(40,110),range =c(1,6))+
+  labs(x="X",y="Y",color="Species",size="DBH")
+ggsave(paste0(path,"result/plot/dbh_40_sp_var.jpeg"),width = 9,height = 6)
+
+
+```
+## 3.2 L function
+使用Ripley's K function(改良後的L function)來探究大徑木分布的空間分布性質。
+```{r}
+max(dt_40$y3)
+L_fun <- function(dt,name){
+  require(spatstat)
+  require(data.table)
+  require(ggplot2)
+  d <- dt
+  window <-  owin(xrange=c(-10,100), yrange=c(0,100))
+                   #設定樣區大小，只有F plot的樣區與其他樣區不同
+  p <- ppp(d$x3,d$y3,window = window)
+  Lf <- envelope(p,Linhom,nsim=99,correction="translate",rank=2.5) 
+  #nsim 代表模擬100次，rank=2.5代表是α值設定為0.05(顯著水準)
+  #改成Lest跑原始的L-function
+  Lf <- as.data.table(Lf)
+  Lf[,2:5] <- Lf[,2:5]-Lf$r
+  p <- ggplot(Lf,aes(x=r))+
+       geom_ribbon(aes(ymin=lo,ymax=hi),fill="gray80")+
+       geom_line(aes(y=theo),color="red",linetype = "dashed")+
+       geom_line(aes(y=obs))+
+       labs(y="L value",x="r (m)")+
+       theme_bw()
+  return(p)
+  ggsave(paste0(path,"result/plot/",name,"jpeg"),plot=p,height = 9,width =6)
+  }
+L_40 <- L_fun(dt_40,"Lf_dbh_40")
+L_fun(dt_40[class=="Disappeared"],"Lf_dbh_40_disap")
+
+```
+
+## 3.3 小徑木分析
+
+```{r}
+dt_10 <- dt_loc[(dbh_2004<=10|dbh_2019<=10)]
+ggplot(dt_10[dbh_2004<=10&dbh_2004>0],aes(x=x3,y=y3,color=Csp_new))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
+ggsave(paste0(path,"result/plot/dbh_10.jpeg"),height = 15,width =20)
+ord_04 <- dt_10[dbh_2004<=10&dbh_2004>0,.(n_04=.N),by=.(Csp_new,Name_id)][order(n_04,decreasing = T)]
+ord_19 <- dt_10[dbh_2019<=10&dbh_2019>0,.(n_19=.N),by=.(Csp_new,Name_id)][order(n_19,decreasing = T)]
+ord_all <- ord_04[ord_19,on=.(Csp_new,Name_id)]
+## 檢視小喬木
+p1 <- ggplot(dt_10[dbh_2004<=10&dbh_2004>0 & Name_id %in% c("SP54","SP58","SP61")],
+             aes(x=x3,y=y3,color=Name_id))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
+p2 <- ggplot(dt_10[dbh_2019<=10&dbh_2019>0 & Name_id %in% c("SP54","SP58","SP61")],
+             aes(x=x3,y=y3,color=Name_id))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
+p1+p2+ plot_layout(guides = "collect")
+ggsave(paste0(path,"result/plot/dbh_10_l_tree.jpeg"),height = 5,width =13)
+## 檢視木本幼木
+p1 <- ggplot(dt_10[dbh_2004<=10&dbh_2004>0 & Name_id %in% c("SP40","SP30","SP24","SP7")],
+             aes(x=x3,y=y3,color=Name_id))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
+p2 <- ggplot(dt_10[dbh_2019<=10&dbh_2019>0 & Name_id %in% c("SP40","SP30","SP24","SP7")],
+             aes(x=x3,y=y3,color=Name_id))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
+p1+p2+ plot_layout(guides = "collect")
+ggsave(paste0(path,"result/plot/dbh_10_tree.jpeg"),height = 5,width =13)
+ggplot(dt_10[dbh_2019==0&dbh_2004<=10],aes(x=x3,y=y3,color=Name_id))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="Species code",size="DBH")
+```
+
