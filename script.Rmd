@@ -16,15 +16,17 @@ output: html_notebook
 ```{r}
 library(data.table)
 library(readxl)
+library(writexl)
 library(tidyverse)
 library(vegan)
 require(factoextra) ## for fviz_nbclust
 library(colorspace)
 library(sf)### Moran’s I 
 library(sp)### Moran’s I 
-library(spdep)### Moran’s I 
 library(writexl)
 library(patchwork)
+library(siplab) #競爭指數
+
 path <- "G:/我的雲端硬碟/協助分析/元偉學長/"
 ```
 # 1. 資料梳理
@@ -203,8 +205,8 @@ p2 <- ggplot(dt_40[dbh_2019>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2019))+
   labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
 p1+p2+ plot_layout(guides = "collect")
 ggsave(paste0(path,"result/plot/sp_dis_40.jpeg"),height = 5,width=13)
-dt_40[dbh_2019==0,class:="Disappeared"][dbh_2019>0,class:="Subsisting"]
-dt_40[dbh_2019>=40&dbh_2004<40,class:="Ingrowth"]
+dt_40[dbh_2019==0,state:="D"][dbh_2019>0,state:="S"]
+dt_40[dbh_2019>=40&dbh_2004<40,state:="I"]
 dt_40[,display_2019:=dbh_2019][dbh_2019==0,display_2019:=dbh_2004]
 ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
   geom_point(alpha=0.7)+
@@ -214,7 +216,7 @@ ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   scale_size(limits=c(40,110),range =c(1,6))+
-  labs(x="X",y="Y",color="Species",size="DBH")
+  labs(x="X",y="Y",color="State",size="DBH")
 ggsave(paste0(path,"result/plot/dbh_40_sp_var.jpeg"),width = 9,height = 6)
 
 
@@ -266,6 +268,7 @@ ggsave(paste0(path,"result/plot/dbh_10.jpeg"),height = 15,width =20)
 ord_04 <- dt_10[dbh_2004<=10&dbh_2004>0,.(n_04=.N),by=.(Csp_new,Name_id)][order(n_04,decreasing = T)]
 ord_19 <- dt_10[dbh_2019<=10&dbh_2019>0,.(n_19=.N),by=.(Csp_new,Name_id)][order(n_19,decreasing = T)]
 ord_all <- ord_04[ord_19,on=.(Csp_new,Name_id)]
+write_excel_csv(ord_all,paste0(path,"result/DBH_10.csv"))
 ## 檢視小喬木
 p1 <- ggplot(dt_10[dbh_2004<=10&dbh_2004>0 & Name_id %in% c("SP54","SP58","SP61")],
              aes(x=x3,y=y3,color=Name_id))+
@@ -316,5 +319,30 @@ ggplot(dt_10[dbh_2019==0&dbh_2004<=10],aes(x=x3,y=y3,color=Name_id))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   labs(x="X",y="Y",color="Species code",size="DBH")
+```
+## 3.4 小徑木最鄰近距離法
+利用最鄰近距離法探究消失的小徑木是受到玉山紫金牛壓迫並取代。以消失的其他物種小徑木為主，計算消失小徑木的最近距離以及2019年的玉山紫金牛的最近距離。並與2019年其他存續小徑木的最近距離與玉山紫金牛距離做比較。若顯著較低，代表著消失小徑木可能受到玉山紫金牛壓迫或取代。
+玉山紫金牛:SP54
+```{r}
+dt_dl <- dt_10[Name_id %in% c("SP54","SP61","SP30","SP7")]
+dt_10[,stat:=NULL]
+dt_10[dbh_2004==0,stat:="Recruitment"]  
+dt_10[dbh_2019==0,stat:="Disappearance"]
+dt_10[is.na(stat),stat:="Subsisting"]
+
+#將2019玉山紫金牛小徑木與消失的非玉山紫金牛小徑木資料變成ppp格式
+sp_54 <- dt_10[Name_id=="SP54"&dbh_2019>0,] 
+sp_54 <- ppp(sp_54$x3,sp_54$y3,owin(xrange=c(-10,100), yrange=c(0,100)))
+sp_dis <- dt_10[Name_id!="SP54"&stat=="Disappearance",] 
+sp_dis <- ppp(sp_dis$x3,sp_dis$y3,owin(xrange=c(-10,100), yrange=c(0,100)))
+nna_dis <- data.table(var="dis",nncross(sp_54,sp_dis))
+sp_other <- dt_10[Name_id!="SP54"&stat!="Disappearance"]
+sp_other <- ppp(sp_other$x3,sp_other$y3,owin(xrange=c(-10,100), yrange=c(0,100)))
+nna_other <- data.table(var="bg",nncross(sp_54,sp_other))
+nna_all <- rbind(nna_dis,nna_other)
+t.test(nna_all[var=="dis",dist],nna_all[var=="bg",dist],alternative="greater")
+ggplot(nna_all,aes(x=var,y=dist))+
+  geom_boxplot()+
+  s
 ```
 
