@@ -13,7 +13,7 @@ output: html_notebook
 以空間分布探究大徑木與小徑木的關係
 
 # 0. package
-```{r}
+```{r,echo=FALSE}
 library(data.table)
 library(readxl)
 library(writexl)
@@ -120,35 +120,41 @@ sh_ind <- melt(sh_ind_t,id.vars = "loc",value.name = "SRI",
 sh_ind[,c("x","y"):=tstrsplit(loc,",",fixed=TRUE)]
 sh_ind[,x_loc:=as.numeric(x)+0.5][
   ,y_loc:=as.numeric(y)+0.5]
-ggplot(data=sh_ind[Year!="diff"],aes(x_loc,y_loc,fill=SRI))+
+sh_ind[,.(SRI_mean=mean(SRI),SRI_min=min(SRI),SRI_max=max(SRI)),by=.(Year)]
+
+p1 <- ggplot(data=sh_ind[Year!="diff"],aes(x_loc,y_loc,fill=SRI))+
   geom_tile(colour = "grey90",alpha=0.8,linewidth=1)+
   theme_bw()+
   scale_x_continuous(breaks=-1:10)+
   scale_y_continuous(breaks=0:10)+
-  labs(x="x-axis",y="y-axis")+
+  labs(x="x-axis",y="y-axis",fill="STI")+
   facet_grid(~Year)+
-  scale_fill_gradient(
-  low = "#56B1F7",
-  high = "#132B43")
+  scale_fill_gradient2(
+  low = "#DE6650",
+  mid = "white",
+  high = "#2128A6",
+  midpoint = 3,
+  limits=c(1,5))
+ggsave(paste0(path,"result/plot/shade_resistance.jpeg"),height=6,width=12,dpi=300)
 
-ggsave(paste0(path,"result/shade_resistance.jpeg"),height=6,width=12,dpi=300)
 sh_ind[,sri_sy:=ifelse(SRI>=0,"+","-")]
+sh_ind[Year=="diff",.N,by=.(sri_sy)]
 sh_ind[SRI==0,sri_sy==0]
-ggplot(data=sh_ind[Year=="diff"],aes(x_loc,y_loc,fill=SRI))+
+p2 <- ggplot(data=sh_ind[Year=="diff"],aes(x_loc,y_loc,fill=SRI))+
   geom_tile(colour = "grey70",alpha=0.8,linewidth=1)+
   theme_bw()+
   scale_x_continuous(breaks=-1:10)+
   scale_y_continuous(breaks=0:10)+
   geom_text(aes(label=sri_sy),size=6,color="gray20")+
-  labs(x="x-axis",y="y-axis",fill="difference of SRI")+
+  labs(x="x-axis",y="y-axis",fill="Difference of STI")+
   scale_fill_gradient2(
   low = "#C23F2B",
   mid = "gray90",
   high ="#2128A6",
   midpoint = 0)
-
-ggsave(paste0(path,"result/shade_resistance_diff.jpeg"),height=6,width=8,dpi=300)
-
+p1/p2+ plot_layout(heights=c(1,2))+plot_annotation(tag_levels = "a")
+ggsave(paste0(path,"result/plot/shade_tolerance_ind_diff.jpeg"),height=9,width=8,dpi=300)
+write_xlsx(sh_dt_t,paste0(path,"result/耐陰性指數分析.xlsx"))
 
 ```
 # 3. 空間分析
@@ -184,11 +190,13 @@ dt_40[,Csp_new:=factor(Csp_new,levels=sp_stat_all[order(ord_04),Csp_new])]
 dt_40[,Name_id:=factor(Name_id,levels=sp_stat_all[order(ord_04),Name_id])]
 fs_name <- sp_stat_all[ord_04 %in% 1:5,Name_id]
 dt_40[Name_id %in% fs_name,Name_id_2:=Name_id][is.na(Name_id_2),Name_id_2:="others"]
+text_size <- 16
 p1 <- ggplot(dt_40[dbh_2004>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2004))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
-                                linewidth = 0.5, linetype = "solid"))+
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size ))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   scale_size(limits=c(40,110),range =c(1,6))+
@@ -198,17 +206,32 @@ p2 <- ggplot(dt_40[dbh_2019>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2019))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
-                                linewidth = 0.5, linetype = "solid"))+
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   scale_size(limits=c(40,110),range =c(1,6))+
   labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
-p1+p2+ plot_layout(guides = "collect")
-ggsave(paste0(path,"result/plot/sp_dis_40.jpeg"),height = 5,width=13)
+
 dt_40[dbh_2019==0,state:="D"][dbh_2019>0,state:="S"]
 dt_40[dbh_2019>=40&dbh_2004<40,state:="I"]
 dt_40[,display_2019:=dbh_2019][dbh_2019==0,display_2019:=dbh_2004]
-ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
+p3 <- ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  scale_size(limits=c(40,110),range =c(1,6))+
+  labs(x="X",y="Y",color="State",size="DBH",title = "Variation")
+(p1+p2)/(p3 + plot_spacer())+plot_layout(guides = "collect")+
+  plot_annotation(tag_levels = 'a')
+ggsave(paste0(path,"result/plot/dbh_40_sp_var.jpeg"),width = 12,height = 10)
+### 耐陰性繪圖
+dt_40 <- sh_tel[dt_40,on=.(Name_id)]
+ggplot(dt_40[state=="D"],aes(x=x3,y=y3,color=Sh_resistance,size=display_2019))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
@@ -216,9 +239,8 @@ ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   scale_size(limits=c(40,110),range =c(1,6))+
-  labs(x="X",y="Y",color="State",size="DBH")
-ggsave(paste0(path,"result/plot/dbh_40_sp_var.jpeg"),width = 9,height = 6)
-
+  scale_color_binned()+
+  labs(x="X",y="Y",color="SR",size="DBH")
 
 ```
 ## 3.2 L function
@@ -256,6 +278,10 @@ L_fun(dt_40[class=="Disappeared"],"Lf_dbh_40_disap")
 
 ```{r}
 dt_10 <- dt_loc[(dbh_2004<=10|dbh_2019<=10)]
+dt_10[,stat:=NULL]
+dt_10[dbh_2004==0,stat:="Recruitment"]  
+dt_10[dbh_2019==0,stat:="Disappeared"]
+dt_10[is.na(stat),stat:="Subsisting"]
 ggplot(dt_10[dbh_2004<=10&dbh_2004>0],aes(x=x3,y=y3,color=Csp_new))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
@@ -275,61 +301,88 @@ p1 <- ggplot(dt_10[dbh_2004<=10&dbh_2004>0 & Name_id %in% c("SP54","SP58","SP61"
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
-                                linewidth = 0.5, linetype = "solid"))+
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
-  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2004 semi-tree or shrub")
 p2 <- ggplot(dt_10[dbh_2019<=10&dbh_2019>0 & Name_id %in% c("SP54","SP58","SP61")],
              aes(x=x3,y=y3,color=Name_id))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
-                                linewidth = 0.5, linetype = "solid"))+
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
-  labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
-p1+p2+ plot_layout(guides = "collect")
-ggsave(paste0(path,"result/plot/dbh_10_l_tree.jpeg"),height = 5,width =13)
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2019 semi-tree or shrub")
+
 ## 檢視木本幼木
-p1 <- ggplot(dt_10[dbh_2004<=10&dbh_2004>0 & Name_id %in% c("SP40","SP30","SP24","SP7")],
+p3 <- ggplot(dt_10[dbh_2004<=10&dbh_2004>0 & Name_id %in% c("SP40","SP30","SP24","SP7")],
              aes(x=x3,y=y3,color=Name_id))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
-                                linewidth = 0.5, linetype = "solid"))+
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
-  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
-p2 <- ggplot(dt_10[dbh_2019<=10&dbh_2019>0 & Name_id %in% c("SP40","SP30","SP24","SP7")],
+  scale_fill_brewer(palette="Set2")+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2004 tree")
+p4 <- ggplot(dt_10[dbh_2019<=10&dbh_2019>0 & Name_id %in% c("SP40","SP30","SP24","SP7")],
              aes(x=x3,y=y3,color=Name_id))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
-                                linewidth = 0.5, linetype = "solid"))+
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
-  labs(x="X",y="Y",color="Species code",size="DBH",title="2019")
-p1+p2+ plot_layout(guides = "collect")
-ggsave(paste0(path,"result/plot/dbh_10_tree.jpeg"),height = 5,width =13)
-ggplot(dt_10[dbh_2019==0&dbh_2004<=10],aes(x=x3,y=y3,color=Name_id))+
+  labs(x="X",y="Y",color="Species code",size="DBH",title="2019 tree")+
+  scale_fill_brewer(palette="Set2")
+
+p5 <- ggplot(dt_10[stat!="Subsisting"],aes(x=x3,y=y3,color=stat))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"),
+        text = element_text(size = text_size))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="State",title="Variation")
+pp1 <- (p1+p2)+plot_layout(guides = "collect")
+pp2 <- (p3+p4)+plot_layout(guides = "collect")
+pp3 <- (p5+ plot_spacer())+plot_layout(guides = "collect")
+(pp1/pp2/pp3)+plot_annotation(tag_levels = 'a')
+ggsave(paste0(path,"result/plot/dbh_10_all.jpeg"),height = 14,width =12)
+dt_10 <- sh_tel[dt_10,on=.(Name_id)]
+ggplot(dt_10[stat=="Disappearance"],aes(x=x3,y=y3,color=Sh_resistance))+
   geom_point(alpha=0.7)+
   theme(panel.background = element_rect(fill = "gray90",
                                 colour = "white",
                                 linewidth = 0.5, linetype = "solid"))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
-  labs(x="X",y="Y",color="Species code",size="DBH")
+  scale_size(limits=c(40,110),range =c(1,6))+
+  scale_color_binned(low = "#56B1F7",
+  high = "#132B43",)+
+  labs(x="X",y="Y",color="SR",size="DBH")
 ```
 ## 3.4 小徑木最鄰近距離法
 利用最鄰近距離法探究消失的小徑木是受到玉山紫金牛壓迫並取代。以消失的其他物種小徑木為主，計算消失小徑木的最近距離以及2019年的玉山紫金牛的最近距離。並與2019年其他存續小徑木的最近距離與玉山紫金牛距離做比較。若顯著較低，代表著消失小徑木可能受到玉山紫金牛壓迫或取代。
 玉山紫金牛:SP54
 ```{r}
 dt_dl <- dt_10[Name_id %in% c("SP54","SP61","SP30","SP7")]
-dt_10[,stat:=NULL]
-dt_10[dbh_2004==0,stat:="Recruitment"]  
-dt_10[dbh_2019==0,stat:="Disappearance"]
-dt_10[is.na(stat),stat:="Subsisting"]
 
+ggplot(dt_10[stat!="Subsisting"],aes(x=x3,y=y3,color=stat))+
+  geom_point(alpha=0.7)+
+  theme(panel.background = element_rect(fill = "gray90",
+                                colour = "white",
+                                linewidth = 0.5, linetype = "solid"))+
+  scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
+  scale_y_continuous(breaks = (seq(0,100,20)))+
+  labs(x="X",y="Y",color="State")
+ggsave(paste0(path,"/result/plot/DBH_10_inc_dis.jpeg"),height = 5,width =8)
 #將2019玉山紫金牛小徑木與消失的非玉山紫金牛小徑木資料變成ppp格式
 sp_54 <- dt_10[Name_id=="SP54"&dbh_2019>0,] 
 sp_54 <- ppp(sp_54$x3,sp_54$y3,owin(xrange=c(-10,100), yrange=c(0,100)))
@@ -342,7 +395,6 @@ nna_other <- data.table(var="bg",nncross(sp_54,sp_other))
 nna_all <- rbind(nna_dis,nna_other)
 t.test(nna_all[var=="dis",dist],nna_all[var=="bg",dist],alternative="greater")
 ggplot(nna_all,aes(x=var,y=dist))+
-  geom_boxplot()+
-  s
+  geom_boxplot()
 ```
 
