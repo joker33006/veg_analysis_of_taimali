@@ -21,8 +21,8 @@ library(tidyverse)
 library(vegan)
 require(factoextra) ## for fviz_nbclust
 library(colorspace)
-library(sf)### Moran’s I 
-library(sp)### Moran’s I 
+library(sf)
+library(spatstat) ###  Ripley's K 
 library(writexl)
 library(patchwork)
 library(siplab) #競爭指數
@@ -127,7 +127,7 @@ p1 <- ggplot(data=sh_ind[Year!="diff"],aes(x_loc,y_loc,fill=SRI))+
   theme_bw()+
   scale_x_continuous(breaks=-1:10)+
   scale_y_continuous(breaks=0:10)+
-  labs(x="x-axis",y="y-axis",fill="STI")+
+  labs(x="x-axis (10m)",y="y-axis (10m)",fill="STI")+
   facet_grid(~Year)+
   scale_fill_gradient2(
   low = "#DE6650",
@@ -141,15 +141,15 @@ sh_ind[,sri_sy:=ifelse(SRI>=0,"+","-")]
 sh_ind[Year=="diff",.N,by=.(sri_sy)]
 sh_ind[SRI==0,sri_sy==0]
 p2 <- ggplot(data=sh_ind[Year=="diff"],aes(x_loc,y_loc,fill=SRI))+
-  geom_tile(colour = "grey70",alpha=0.8,linewidth=1)+
+  geom_tile(colour = "grey85",alpha=0.8,linewidth=1)+
   theme_bw()+
   scale_x_continuous(breaks=-1:10)+
   scale_y_continuous(breaks=0:10)+
   geom_text(aes(label=sri_sy),size=6,color="gray20")+
-  labs(x="x-axis",y="y-axis",fill="Difference of STI")+
+  labs(x="x-axis (10m)",y="y-axis (10m)",fill="Difference of STI")+
   scale_fill_gradient2(
   low = "#C23F2B",
-  mid = "gray90",
+  mid = "white",
   high ="#2128A6",
   midpoint = 0)
 p1/p2+ plot_layout(heights=c(1,2))+plot_annotation(tag_levels = "a")
@@ -190,17 +190,17 @@ dt_40[,Csp_new:=factor(Csp_new,levels=sp_stat_all[order(ord_04),Csp_new])]
 dt_40[,Name_id:=factor(Name_id,levels=sp_stat_all[order(ord_04),Name_id])]
 fs_name <- sp_stat_all[ord_04 %in% 1:5,Name_id]
 dt_40[Name_id %in% fs_name,Name_id_2:=Name_id][is.na(Name_id_2),Name_id_2:="others"]
+
+###
 text_size <- 16
-p1 <- ggplot(dt_40[dbh_2004>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2004))+
+ggplot(dt_40[dbh_2004>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2004))+
   geom_point(alpha=0.7)+
-  theme(panel.background = element_rect(fill = "gray90",
-                                colour = "white",
-                                linewidth = 0.5, linetype = "solid"),
-        text = element_text(size = text_size ))+
+  theme(text = element_text(size = text_size ))+
+  theme_bw()+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   scale_size(limits=c(40,110),range =c(1,6))+
-  labs(x="X",y="Y",color="Species code",size="DBH",title="2004")
+  labs(x="X(m)",y="Y",color="Species code",size="DBH",title="2004")
 
 p2 <- ggplot(dt_40[dbh_2019>=40],aes(x=x3,y=y3,color=Name_id_2,size=dbh_2019))+
   geom_point(alpha=0.7)+
@@ -217,11 +217,8 @@ dt_40[dbh_2019==0,state:="D"][dbh_2019>0,state:="S"]
 dt_40[dbh_2019>=40&dbh_2004<40,state:="I"]
 dt_40[,display_2019:=dbh_2019][dbh_2019==0,display_2019:=dbh_2004]
 p3 <- ggplot(dt_40,aes(x=x3,y=y3,color=class,size=display_2019))+
-  geom_point(alpha=0.7)+
-  theme(panel.background = element_rect(fill = "gray90",
-                                colour = "white",
-                                linewidth = 0.5, linetype = "solid"),
-        text = element_text(size = text_size))+
+  geom_point(alpha=0.9)+
+  theme(text = element_text(size = text_size))+
   scale_x_continuous(breaks = (seq(-20,100,20)),limits = c(-15,105))+
   scale_y_continuous(breaks = (seq(0,100,20)))+
   scale_size(limits=c(40,110),range =c(1,6))+
@@ -243,6 +240,19 @@ ggplot(dt_40[state=="D"],aes(x=x3,y=y3,color=Sh_resistance,size=display_2019))+
   labs(x="X",y="Y",color="SR",size="DBH")
 
 ```
+### 3.11 計算 Ripley's K 
+```{r}
+window <-  owin(xrange=c(-10,100), yrange=c(0,100))
+                   #設定樣區大小，只有F plot的樣區與其他樣區不同
+p_40 <- ppp(dt_40$x3,dt_40$y3,window = window)
+clarkevans(p_40)
+p_40_Disappeared <-ppp(dt_40[class=="Disappeared"]$x3,dt_40[class=="Disappeared"]$y3,window = window) 
+clarkevans(p_40_Disappeared)
+p_40_ingrowth <-ppp(dt_40[class=="Ingrowth"]$x3,dt_40[class=="Ingrowth"]$y3,window = window) 
+clarkevans(p_40_ingrowth)
+```
+
+
 ## 3.2 L function
 使用Ripley's K function(改良後的L function)來探究大徑木分布的空間分布性質。
 ```{r}
